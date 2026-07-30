@@ -1,0 +1,333 @@
+Multi-Chat Streamer Hub con TTS — Fase 1 (Twitch) - Subagent Loop Orchestration
+
+Orquesta el plan de ejecución `docs/exec-plans/active/streamer-chat-tts-hub.md` hasta su
+finalización usando la skill `execute-subagents-loop`: parsea el DAG de tareas del plan, lanza
+el ready set completo como subagentes `ralph-loop-iteration` en paralelo (uno por tarea, cada
+uno en su propio git worktree), mergea a la rama de integración cuando un subagente señaliza
+`COMPLETE <sha>`, reintenta cuando señaliza `CONTINUE <sha>` o queda BLOCKED, ejecuta el gate
+de integración final y reporta la convergencia.
+
+División de labores — no la cruces. Tú (el orquestador) eres dueño del *scheduling*, la
+*integración* y la *convergencia*. No escribes código, no editas archivos de tareas, no
+inspeccionas ni criticas diffs, no juzgas calidad, no re-planeas, no reordenas y no inventas
+dependencias. Toda la ingeniería vive dentro de los subagentes. Una invocación de
+`ralph-loop-iteration` ES una iteración de ralph: crea su worktree, lleva la tarea a
+verified-green, commitea y termina con `COMPLETE <sha>` o `CONTINUE <sha>`. Tú reaccionas a esa
+señal; nunca metes mano dentro de ella.
+
+
+== Required Context ==
+
+Lee antes de empezar:
+
+- `docs/exec-plans/active/streamer-chat-tts-hub.md` — el plan de ejecución. Fuente de verdad
+  del DAG (sección `## Implementation Order`), de los criterios de aceptación por tarea y de
+  las decisiones arquitectónicas durables (sección `## Decisiones arquitectónicas durables`:
+  rutas, esquema SQLite, interfaces adapter, IDs de voz namespaced, modelo de prioridad de voz).
+- `docs/decisiones.md` — el PRD efectivo: resultado de la sesión de grill, con el alcance
+  acordado y el stack. Consúltalo cuando un criterio de aceptación necesite contexto de "por qué".
+- `docs/pitch-grill-me.md` — pitch original (contexto histórico, opcional).
+- `.claude/skills/execute-subagents-loop/SKILL.md` — tu manual de operación (pasos 1–7).
+- `.claude/agents/ralph-loop-iteration.md` — el contrato del subagente.
+
+Advertencias sobre el contexto disponible (verificadas en este repo, NO las trates como
+archivos faltantes que debas crear):
+
+- NO existe `AGENTS.md` ni `CLAUDE.md` en este proyecto. Las restricciones que aplican son las
+  de este brief y las del plan; no hay non-negotiables de repo aparte de esas.
+- NO existen `scripts/ralph.sh` ni `docs/ralph-loop-spec.md`. El Step 0 de
+  `execute-subagents-loop` (re-leer el runner cada corrida) y el checklist de
+  auto-verificación del subagente que pide leer ambos NO se pueden satisfacer aquí y quedan
+  explícitamente exentos. El contrato de la señal de parada es el que dicta este brief.
+- El archivo `.claude/agents/ralph-loop-iteration.md` es específico de YardOS (pnpm,
+  workspaces, Kysely, Keycloak, PGlite, Storybook, vue-i18n, modelo de timezone, baseline
+  `develop`, ruta de agent-memory en otra máquina). Ese bloque de "YardOS Non-Negotiables" NO
+  aplica a este proyecto y debes anularlo explícitamente en el prompt de cada subagente (ver
+  la plantilla más abajo). Lo que SÍ se reutiliza verbatim de ese archivo es el contrato de
+  ejecución: una iteración coherente, verified-green obligatorio, commit en el worktree, y la
+  señal final `COMPLETE <sha>` / `CONTINUE <sha>` sola en la última línea.
+
+
+== The DAG (scheduling input) ==
+
+Ninguna tarea está `done`. El repo es greenfield: solo contiene `docs/` y este brief; T-001
+crea todo el andamiaje. Ejecuta las 13 tareas.
+
+Aristas de dependencia (transcritas de `## Implementation Order` del plan):
+
+- T-002 depends on T-001
+- T-003 depends on T-002
+- T-004 depends on T-003
+- T-005 depends on T-001
+- T-006 depends on T-004, T-005
+- T-007 depends on T-004, T-005
+- T-008 depends on T-004, T-005
+- T-009 depends on T-008
+- T-010 depends on T-008
+- T-011 depends on T-007, T-008, T-009
+- T-012 depends on T-011
+- T-013 depends on T-011
+
+Nota de derivación (única desviación de la lectura literal del plan, hecha explícita aquí):
+el plan lista T-011 como "depende de T-007 y T-008 (idealmente tras T-009 para tener catálogo
+real)". Ese "idealmente" se endurece a una arista real T-011 depends on T-009, porque el
+selector de voz de T-011 se alimenta del catálogo agregado y sin edge-tts la tarea se
+verificaría contra un catálogo incompleto. No introduzcas ninguna otra dependencia.
+
+Olas resultantes (el ready set de cada iteración del Step 3; recalcula siempre desde el
+estado real de merges, no desde esta lista):
+
+- Ola 1: T-001
+- Ola 2: T-002, T-005            (paralelas)
+- Ola 3: T-003
+- Ola 4: T-004
+- Ola 5: T-006, T-007, T-008     (paralelas)
+- Ola 6: T-009, T-010            (paralelas)
+- Ola 7: T-011
+- Ola 8: T-012, T-013            (paralelas)
+
+Nombres exactos de tarea (para el prompt de cada subagente y para el slug de su rama):
+
+- T-001: Scaffold del monorepo con PM2
+- T-002: Capa de datos SQLite y configuración
+- T-003: OAuth con Twitch
+- T-004: EventSub y relay de mensajes al frontend
+- T-005: Shell de UI y panel de chat
+- T-006: Enviar mensajes al chat
+- T-007: Columna de usuarios híbrida
+- T-008: Núcleo TTS — motor del navegador, cola y filtros
+- T-009: Motor edge-tts
+- T-010: Motor Piper
+- T-011: Modelo de voz/pitch y acciones por usuario
+- T-012: Comando !cambia-mi-voz
+- T-013: Ajustes globales y toggle de tema
+
+
+== Integration Branch & Worktree Naming ==
+
+- La rama actual es la rama de integración. En este repo es `main` (recién inicializado, con
+  un commit de docs). Confírmala con `git rev-parse --abbrev-ref HEAD` al empezar y usa lo que
+  devuelva, no un valor hardcodeado.
+- Verifica que el árbol de la rama de integración esté limpio antes de lanzar nada. Si está
+  sucio, detente y avisa al operador.
+- Convención de nombre de rama de worktree:
+
+      ralph/<sanitized-integration-branch>/<task-code>-<task-slug>
+
+  donde `<sanitized-integration-branch>` es la rama de integración con `/` reemplazado por `-`,
+  `<task-code>` es el código en minúsculas y `<task-slug>` es el nombre de la tarea en
+  kebab-case. Con `main` como integración, los nombres son:
+
+      ralph/main/t-001-scaffold-del-monorepo-con-pm2
+      ralph/main/t-002-capa-de-datos-sqlite-y-configuracion
+      ralph/main/t-003-oauth-con-twitch
+      ralph/main/t-004-eventsub-y-relay-de-mensajes-al-frontend
+      ralph/main/t-005-shell-de-ui-y-panel-de-chat
+      ralph/main/t-006-enviar-mensajes-al-chat
+      ralph/main/t-007-columna-de-usuarios-hibrida
+      ralph/main/t-008-nucleo-tts-motor-del-navegador-cola-y-filtros
+      ralph/main/t-009-motor-edge-tts
+      ralph/main/t-010-motor-piper
+      ralph/main/t-011-modelo-de-voz-pitch-y-acciones-por-usuario
+      ralph/main/t-012-comando-cambia-mi-voz
+      ralph/main/t-013-ajustes-globales-y-toggle-de-tema
+
+
+== Per-Task Subagent Prompt Template ==
+
+Lanza cada tarea lista con una llamada `Agent` (`subagent_type: "ralph-loop-iteration"`), todas
+las de la ola en un solo mensaje. Usa esta plantilla, sustituyendo los campos entre `<>`:
+
+---8<---
+Implementa <TASK_CODE>: <TASK_NAME> del exec-plan `docs/exec-plans/active/streamer-chat-tts-hub.md`.
+
+Trabaja en un git worktree aislado creado desde el tip actual de la rama de integración
+(`<INTEGRATION_BRANCH>`), en la rama `<WORKTREE_BRANCH>`.
+
+Contexto de dependencias: <DEPENDENCY_CONTEXT — p.ej. "T-004 y T-005 ya están mergeadas en el
+tip de integración, así que tu worktree ya contiene el relay de EventSub por /ws y el shell de
+UI con el panel de chat; construye sobre eso." Para tareas sin predecesoras: "Es la primera
+tarea; el repo solo contiene docs/ y scripts/prompts/.">
+
+Lee, antes de editar:
+- La sección `### <TASK_CODE>:` del plan (descripción + criterios de aceptación). Esos
+  checkboxes son tu definición de alcance: márcalos en el plan a medida que los cumplas.
+- La sección `## Decisiones arquitectónicas durables` del plan (rutas, esquema SQLite,
+  interfaces adapter, IDs de voz namespaced, modelo de prioridad de voz). Respétala al pie de
+  la letra; no la re-diseñes.
+- `docs/decisiones.md` para el "por qué" cuando un criterio sea ambiguo.
+
+ANULACIONES DE TU DEFINICIÓN DE AGENTE (importantes — tu definición es de otro repo):
+- Este proyecto NO es YardOS. Ignora por completo la sección "YardOS Non-Negotiables"
+  (multi-tenancy, Kysely, Keycloak, PGlite/event_queue, Storybook-first, vue-i18n, modelo de
+  timezone, baseline `develop`). Nada de eso existe aquí.
+- NO existen `scripts/ralph.sh` ni `docs/ralph-loop-spec.md`; omite el ítem del checklist que
+  pide leerlos. El contrato vigente es este prompt.
+- NO uses `pnpm` ni comandos con `--filter`: este proyecto usa `npm` y dos paquetes
+  (`backend/`, `frontend/`), no un workspace de pnpm.
+- Es JavaScript puro, sin TypeScript: NO hay typecheck, no busques `vue-tsc` ni `tsconfig`, y
+  no introduzcas TypeScript.
+- Si escribes agent-memory, hazlo bajo `.claude/agent-memory/ralph-loop-iteration/` de ESTE
+  repo (créalo si no existe); la ruta absoluta de tu definición apunta a otra máquina.
+
+GATES DE VERIFICACIÓN (qué significa "verified green" aquí). Ejecuta los que apliquen al
+código que tocaste; si tocaste ambos lados, ejecuta todos:
+- Backend:  `npm --prefix backend run lint`
+- Frontend: `npm --prefix frontend run lint`
+- Frontend: `npm --prefix frontend run build`     ← el gate de build es obligatorio si tocaste frontend
+- Pruebas de humo del backend donde el plan las define (p.ej. el script de smoke de T-002):
+  `npm --prefix backend run <script>`
+- Verificación en navegador para toda tarea con el criterio "Verify in browser": levanta la
+  app y comprueba el comportamiento de verdad (ver "Puertos en paralelo" abajo). Reporta qué
+  observaste, no solo que compiló.
+No falsifiques verde. Si un gate no pasa tras esfuerzo diligente, para y reporta el output
+exacto que falla más tu hipótesis.
+
+Puertos en paralelo (varias worktrees corren a la vez):
+- Deriva tus puertos del número de tarea para no chocar con otros subagentes: backend
+  `3000 + N`, frontend `5173 + N`, donde N es el número de tu tarea (T-007 → 3007 / 5180).
+  Configúralos por variable de entorno/`.env` local del worktree, NO cambiando los defaults
+  del código (los defaults committeados deben quedar en 3000/5173).
+- EXCEPCIÓN — el flujo OAuth: el redirect URI registrado en la app de Twitch es
+  `http://localhost:3000/auth/callback`, así que la tarea que verifique el login real (T-003)
+  debe correr en el puerto 3000. T-003 va en una ola en solitario, así que no hay conflicto.
+- Para verificar contra Twitch en vivo sin repetir el OAuth: copia el SQLite ya autenticado
+  del árbol principal (`backend/data/app.sqlite`) dentro de tu worktree. Con tokens válidos en
+  la BD, EventSub y Helix funcionan en cualquier puerto. Nunca commitees ese archivo (está
+  git-ignorado) ni pegues tokens en tu reporte ni en logs.
+
+CONTRATO (verbatim de tu definición de agente):
+- Haz UN incremento coherente, quirúrgico y en convención con el código circundante. No
+  expandas el alcance más allá de <TASK_CODE>.
+- Verifica verde con los gates de arriba antes de declarar nada.
+- Commitea en tu worktree con un mensaje descriptivo (`<task-code>: <qué hiciste>`). El árbol
+  debe contener exactamente el trabajo de esta tarea: nada a medias, sin archivos scratch, sin
+  restos de debugging.
+- Captura el SHA con `git rev-parse HEAD`.
+- Cierra tu salida con el reporte estructurado (resumen de la iteración; ruta y rama del
+  worktree; verificación: comandos exactos ejecutados y su resultado con fragmentos de output;
+  estado DONE o BLOCKED; siguientes pasos) y una sección **Obstacles Encountered** con
+  workarounds, quirks del entorno, flags especiales y dependencias problemáticas — sobre todo
+  si NO llegaste a commitear.
+- La ÚLTIMA línea de tu salida debe ser, sola, `COMPLETE <sha>` (tarea completa y verde) o
+  `CONTINUE <sha>` (queda trabajo; pon la nota de "qué sigue" en las líneas inmediatamente
+  anteriores). Palabra clave, un espacio, el SHA, nada después. NUNCA envuelvas la señal en
+  etiquetas `<promise>`: esa forma es muerta y no hace match.
+---8<---
+
+
+== React to Results ==
+
+Para cada subagente que termine, lee su última línea y su reporte estructurado:
+
+- `COMPLETE <sha>` (estado DONE): desde la rama de integración, `git merge --no-ff <task-branch>`.
+  - Merge limpio → marca la tarea `done`, elimina el worktree (`git worktree remove`) y poda la
+    rama. Los dependientes de la siguiente ola nacerán de este nuevo tip y verán el trabajo
+    mergeado: así fluye el estado por las aristas del DAG.
+  - Merge con conflictos → NO lo fuerces. Marca la tarea `blocked`, deja el worktree en su
+    lugar y expón el conflicto al operador (qué archivos, qué dos tareas colisionaron). Un
+    conflicto significa que la suposición de "alcance disjunto" se rompió: es decisión del
+    operador, no tuya.
+- `CONTINUE <sha>` o estado BLOCKED: la tarea no convergió en una iteración. Relánzala como un
+  subagente `ralph-loop-iteration` fresco, pasándole el reporte de la corrida anterior
+  (especialmente su sección **Obstacles Encountered**) para que retome en vez de reempezar. El
+  worktree y la rama persisten entre intentos, así que el progreso no se pierde.
+- Techo de intentos por tarea: 3 (default). Si sigue sin estar `done` tras el tercer intento,
+  márcala `failed`, marca `skipped` todo su subárbol dependiente (nunca podrán quedar listas) y
+  registra el blocker preciso. Las ramas independientes del DAG siguen corriendo.
+
+Subárboles dependientes, para cuando tengas que saltarlos: T-001 → todo; T-002 → T-003..T-013;
+T-003 → T-004..T-013; T-004 → T-006..T-013; T-005 → T-006..T-013; T-008 → T-009..T-013;
+T-009 → T-011..T-013; T-011 → T-012, T-013. T-006, T-007, T-010, T-012 y T-013 son hojas
+(fallar una no bloquea a nadie más).
+
+
+== Final Integration Gate ==
+
+Cuando el loop de scheduling se drene, la rama de integración contiene todas las tareas
+mergeadas — pero verde-en-aislamiento NO implica verde-integrado (dos worktrees pueden pasar
+sus gates por separado y romperse al combinarse). Ejecuta el gate completo sobre la rama de
+integración:
+
+    npm --prefix backend install && npm --prefix frontend install
+    npm --prefix backend run lint
+    npm --prefix frontend run lint
+    npm --prefix frontend run build
+    npm --prefix backend run <scripts de smoke definidos por el plan>
+
+Y un arranque real end-to-end en los puertos default: `pm2 start ecosystem.config.js`, la app
+carga, el chat de Twitch llega, un mensaje se lee por TTS, `pm2 stop all` la tumba limpiamente.
+
+Si el gate de integración falla, repórtalo como blocker. NO declares la corrida completa.
+
+
+== Convergence Report ==
+
+Cierra con:
+
+- Estado por tarea (done / blocked / failed / skipped) de las 13.
+- Los commits mergeados en la rama de integración.
+- Conflictos dejados al operador (archivos y tareas involucradas).
+- Worktrees que quedaron en su lugar y por qué.
+- El resultado del gate de integración final.
+- Veredicto: COMPLETE (las 13 `done`, todos los criterios de aceptación marcados en el plan y
+  gate de integración verde) vs INCOMPLETE (lista cada tarea `failed`, su blocker y el subárbol
+  `skipped`).
+
+
+== Rules ==
+
+- Lanza el ready set COMPLETO en paralelo: una llamada `Agent` por tarea lista, con
+  `subagent_type: "ralph-loop-iteration"`, todas en un solo mensaje.
+- Una tarea está lista solo cuando TODAS sus dependencias están `done` Y mergeadas en la rama
+  de integración. No arranques un dependiente antes de que sus predecesoras mergeen.
+- La señal de parada del subagente es `COMPLETE <sha>` / `CONTINUE <sha>`: palabra clave desnuda
+  + SHA, sola en la última línea. Jamás `<promise>`.
+- Mergea solo con `COMPLETE` y solo si el merge es limpio.
+- No escribas código, no edites archivos de tareas, no arregles fallos tú mismo: relanza el
+  subagente.
+- No inspecciones ni critiques el diff de una tarea; confía en el `COMPLETE` verificado-verde.
+- No re-planees, no reordenes ni inventes dependencias: el `## Implementation Order` del plan
+  (más la arista T-011→T-009 declarada arriba) ES el DAG.
+- No declares la corrida COMPLETE sin que el gate de integración final pase y sin que todos los
+  criterios de aceptación estén marcados.
+- Echa el DAG parseado de vuelta al operador (códigos, nombres, aristas, qué ya está done)
+  ANTES de lanzar el primer subagente.
+
+
+== Initiative-Specific Constraints ==
+
+1. Alcance disjunto por ola — el riesgo real de conflicto de esta corrida. Las olas paralelas
+   tocan zonas que pueden solaparse; asigna propiedad de archivos en el prompt de cada
+   subagente y dilo explícitamente:
+   - Ola 2 (T-002 backend / T-005 frontend): naturalmente disjuntas, sin acción especial.
+   - Ola 5 (T-006, T-007, T-008): las tres tocan frontend sobre el shell que creó T-005. T-006
+     es dueña del componente de input inferior; T-007 de la columna derecha de usuarios; T-008
+     de la capa TTS (motor, cola, controles). Instruye a cada una a NO reestructurar el layout
+     ni el store de WebSocket creados por T-005: solo montar su pieza en el slot que le
+     corresponde. Si una necesita tocar el archivo de layout, que sea la línea mínima.
+   - Ola 6 (T-009, T-010): ambas registran un motor en el registro de `TTSEngine` del backend.
+     Ese archivo es el punto de colisión previsible. Instruye a ambas a añadir su motor como una
+     entrada aislada, sin refactorizar el registro ni reordenar entradas existentes.
+   - Ola 8 (T-012 backend-command / T-013 UI de ajustes): mayormente disjuntas, pero ambas leen
+     el modelo de resolución de voz de T-011; ninguna debe modificarlo.
+2. Nada de secretos en el repo ni en los reportes. `backend/.env` y `backend/data/*.sqlite`
+   están git-ignorados (T-001 lo establece). Ningún subagente commitea tokens, ni los imprime
+   en su reporte, ni los pega en logs. Solo `backend/.env.example` se commitea.
+3. La app de Twitch ya está registrada por el operador; el redirect URI es
+   `http://localhost:3000/auth/callback` y las credenciales viven en `backend/.env` local.
+   Ningún subagente debe intentar registrar una app nueva ni cambiar el redirect URI.
+4. Multiplataforma obligatorio: desarrollo en macOS, producción en Windows 11. Nada de rutas
+   POSIX hardcodeadas, nada de comandos de shell exclusivos de Unix en los scripts de npm/PM2, y
+   T-010 (Piper) debe seleccionar el binario por plataforma (macOS ahora, `win_amd64`
+   contemplado). Las tareas que solo se pueden verificar en macOS deben decirlo en su reporte.
+5. Documentos fuente de solo lectura: `docs/decisiones.md` y `docs/pitch-grill-me.md` son
+   artefactos de diseño; los subagentes los leen y NUNCA los modifican. El único documento que
+   los subagentes editan es el plan, y solo para marcar sus propios checkboxes de aceptación
+   (`- [ ]` → `- [x]`) y añadir notas de implementación de su tarea.
+6. Dependencias de red: T-009 (edge-tts) requiere internet y T-010 descarga binario+modelos de
+   Piper (cientos de MB). Si la red no está disponible, eso es un blocker legítimo a reportar,
+   no algo que fingir verde. Los artefactos descargados de Piper van a una ruta git-ignorada.
+7. Este es el primer código del proyecto: T-001 establece las convenciones (estructura, config
+   de ESLint, scripts de npm, forma del `ecosystem.config.js`). Todas las tareas posteriores se
+   ajustan a lo que T-001 dejó en lugar de introducir un estilo propio.

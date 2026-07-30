@@ -1,0 +1,34 @@
+# Dependencias
+node_modules/
+
+# Build / caches
+dist/
+.vite/
+*.tsbuildinfo
+
+# Secretos y configuración local (nunca commitear)
+.env
+.env.*
+!.env.example
+
+# Base de datos SQLite (T-002 crea backend/data/app.sqlite)
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+backend/data/
+
+# Artefactos descargados: binario y modelos de Piper (T-010)
+backend/vendor/
+
+# Logs y estado de PM2
+logs/
+*.log
+.pm2/
+
+# Sistema operativo / editores
+.DS_Store
+Thumbs.db
+
+# Certificados TLS locales para HTTPS (mkcert): nunca se commitean.
+certs/

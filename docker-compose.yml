@@ -1,0 +1,22 @@
+# Servicios opcionales fuera del proceso Node. Por ahora, solo MeloTTS: un
+# motor TTS de mejor calidad que Piper, en español, con pesos MIT (a
+# diferencia de XTTS-v2/Fish Speech, que son no-comerciales). El backend lo
+# consume por HTTP si `TTS_MELO_ENABLED=true` (default) y el contenedor está
+# arriba; si no lo está, ese motor simplemente no aparece en `GET /api/voices`
+# — la misma degradación limpia que Piper sin instalar.
+#
+#   docker compose up -d melotts     # levantarlo
+#   docker compose logs -f melotts   # ver progreso (la primera vez tarda: build)
+#   docker compose down              # bajarlo
+services:
+  melotts:
+    build: ./docker/melotts
+    ports:
+      - "8100:8100"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

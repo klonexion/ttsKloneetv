@@ -1,0 +1,48 @@
+{
+  "name": "tts-hub-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backend del hub: Express (REST/OAuth) + ws (WebSocket al frontend) + motores TTS de servidor.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
+    "test:db": "node scripts/smoke-db.js",
+    "test:oauth": "node scripts/smoke-oauth.js",
+    "test:eventsub": "node scripts/smoke-eventsub.js",
+    "test:chat-send": "node scripts/smoke-chat-send.js",
+    "test:chatters": "node scripts/smoke-chatters.js",
+    "test:tts": "node scripts/smoke-tts.js",
+    "test:edge-tts": "node scripts/smoke-edge-tts.js",
+    "test:piper": "node scripts/smoke-piper.js",
+    "test:sapi": "node scripts/smoke-sapi.js",
+    "test:melo": "node scripts/smoke-melo.js",
+    "test:voice-model": "node scripts/smoke-voice-model.js",
+    "test:chat-command": "node scripts/smoke-chat-command.js",
+    "test:settings": "node scripts/smoke-settings.js",
+    "setup:piper": "node scripts/setup-piper.js",
+    "fake-twitch": "node scripts/fake-twitch.js",
+    "fake-eventsub": "node scripts/fake-eventsub.js",
+    "fake-helix-chat": "node scripts/fake-helix-chat.js",
+    "fake-chatters": "node scripts/fake-chatters.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.1",
+    "dotenv": "^17.4.2",
+    "edge-tts-universal": "1.4.0",
+    "express": "^5.2.1",
+    "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^17.7.0"
+  }
+}
