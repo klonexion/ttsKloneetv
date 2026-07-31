@@ -98,11 +98,16 @@ Plan completo en `docs/exec-plans/active/configura-mi-voz.md`. Decisiones:
   loguear a un viewer, mostrarle la pantalla y guardar su propia fila. El
   backend admin (moderación, enviar chat como el streamer, ajustes) sigue
   100% `localhost`.
-- **Salida a internet: hostname DDNS fijo (DuckDNS) + certificado real
-  (win-acme/Let's Encrypt)**, no un túnel efímero — Twitch exige match exacto
-  de `redirect_uri`, y una URL que cambia cada sesión (túnel gratis sin
-  cuenta) obligaría a re-registrar el redirect URI en dev.twitch.tv cada vez
-  que se prende el sistema.
+- **Salida a internet: túnel de Cloudflare con nombre fijo** sobre un dominio
+  propio (`kloneetv.lol`), no un túnel efímero — Twitch exige match exacto de
+  `redirect_uri`, y una URL que cambia cada sesión obligaría a re-registrarla
+  en dev.twitch.tv cada vez que se prende el sistema. Se había planeado DDNS
+  (DuckDNS) + certificado real (win-acme) + port-forward, y de hecho se armó
+  esa ruta completa (certificado real emitido, DuckDNS funcionando), pero el
+  router del streamer resultó tener un bug de firmware que solo aplicaba la
+  primera regla de port-forward — el túnel de Cloudflare no depende del
+  router en absoluto, así que se usó eso en su lugar. La ruta DDNS queda
+  documentada como alternativa por si se cambia de router.
 - **La voz que el viewer se elige entra al mismo nivel que el override del
   streamer** (nivel 1 de la prioridad de arriba): gana el último que la
   toque, sea el streamer desde su panel o el viewer desde esta pantalla nueva.

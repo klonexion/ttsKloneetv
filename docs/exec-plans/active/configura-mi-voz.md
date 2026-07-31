@@ -148,66 +148,56 @@ inyectable (default: el real) — la prueba ahora pasa siempre un doble y hay un
 comentario en el propio código de `commands.js` explicando por qué no se debe
 quitar. Ver el `git log` de esa noche para el detalle exacto del cambio.
 
-### T-016 — Hostname estable + certificado + salida a internet
+**Agregado el 2026-07-31**: `POST /viewer/preview` en
+`viewer/preferences-router.js` — vista previa de audio antes de guardar.
+Reusa exactamente el mismo `engine.synthesize({text, voiceId, pitch, timbre})`
+que ya usa el resto del sistema (ver `backend/src/tts/server-audio.js`), sin
+persistir nada. Para voces `browser:*` no pasa por el servidor: el propio
+`viewer/public/app.js` sintetiza con Web Speech API directo en el navegador
+del viewer (no habría nada que generar del lado del servidor para esa voz).
+Botón "🔊 Probar voz" en la pantalla, probado en vivo por el streamer.
 
-Esto es mayormente **trabajo manual del streamer** (vos), con algún script de
-apoyo de mi lado.
+### T-016 — Salida a internet: hostname estable + certificado — RESUELTO
 
-**Estado (2026-07-30, en curso):**
+El plan original (DDNS + port-forward + win-acme) quedó **reemplazado en la
+práctica** por un túnel de Cloudflare con nombre fijo, porque el router de
+este streamer (ATW-622G de Telmex) tiene un bug de firmware real: solo
+aplicaba la primera regla de port-forward que se cargaba, sin importar cuántas
+más se agregaran después (confirmado empíricamente: la regla del puerto 80
+funcionó — de hecho emitió un certificado Let's Encrypt real vía HTTP-01 antes
+de descubrir el problema — pero 443 y 8443 daban `ECONNREFUSED` desde afuera
+incluso con las reglas bien cargadas en la tabla del router). Reiniciar el
+router quedó como alternativa no probada; se optó por Cloudflare Tunnel en su
+lugar porque no depende del router en absoluto.
 
-- [x] Cuenta DuckDNS creada, dominio `kloneetv.duckdns.org` registrado y
-      resolviendo a la IP pública real (verificado con `nslookup`).
-- [x] `scripts/duckdns-update.mjs` (proceso `tts-duckdns` en
-      `ecosystem.config.js`): pinguea `duckdns.org/update` cada 5 min para que
-      el hostname siga la IP si cambia. Token en `.env` (git-ignorado, nunca en
-      `.env.example`), nunca se loguea.
-- [x] `viewer/server.js` ahora sabe servir HTTPS con un certificado real
-      (`VIEWER_HTTPS=true` + `VIEWER_TLS_CERT_FILE`/`VIEWER_TLS_KEY_FILE`,
-      default `certs/duckdns/{fullchain,privkey}.pem`), separado del `mkcert`
-      local del backend admin.
-- [ ] **Falta**: emitir el certificado de verdad (win-acme), el port-forward
-      en el router, y registrar el redirect URI público en dev.twitch.tv.
-      Estos tres son pasos que solo el streamer puede hacer (elevación de
-      Windows, panel del router, cuenta de Twitch) — quedan abajo con las
-      instrucciones exactas.
+**Estado final (2026-07-31): andando en producción.**
 
-**Lo que hacés vos, una sola vez:**
+- [x] Dominio propio comprado (`kloneetv.lol`, Porkbun) y DNS delegado a
+      Cloudflare (gratis).
+- [x] Túnel de Cloudflare **con nombre fijo** (`tts-hub-viewer`,
+      `cloudflared tunnel create` + `route dns` + `~/.cloudflared/config.yml`
+      con ingress hacia `http://localhost:VIEWER_SERVICE_PORT`). El hostname
+      público (`https://kloneetv.lol`) **no cambia nunca** — el redirect URI se
+      registra una sola vez en dev.twitch.tv, para siempre.
+- [x] `scripts/cloudflare-tunnel.mjs` soporta los dos modos: túnel con nombre
+      fijo si `.env` tiene `CLOUDFLARE_TUNNEL_NAME`/`CLOUDFLARE_TUNNEL_HOSTNAME`
+      (el paso a paso completo de cómo se armó el túnel está en el comentario
+      grande de ese archivo), o cae a un "quick tunnel" efímero sin cuenta si
+      no. Wireado en `npm start`/`stop`/`down`.
+- [x] Verificado de punta a punta contra `https://kloneetv.lol` desde un
+      vantage point externo real (no solo desde la red del streamer, que sufre
+      de NAT hairpin y no sirve como prueba): `GET /api/health` → `200`, y el
+      login de viewer completo con una cuenta de Twitch real.
+- [x] Ciclo `npm stop` → `npm start` probado limpio: el túnel se apaga y
+      vuelve a levantar solo, sin intervención manual.
 
-1. Cuenta gratis en [duckdns.org](https://www.duckdns.org) (login con
-   GitHub/Google/etc.) → elegís un subdominio, p. ej. `tuombre.duckdns.org`
-   → te da un token.
-2. `win-acme` (`https://www.win-acme.com/`, un `.exe`, gratis): lo corrés una
-   vez apuntado a `tuombre.duckdns.org`, te deja el certificado Let's Encrypt
-   instalado y una tarea programada de Windows que lo renueva solo cada ~60
-   días. Necesita el puerto 80 accesible momentáneamente para la validación
-   (HTTP-01 challenge).
-3. En el router de tu casa: port-forward del puerto público (443 sugerido) a
-   la IP interna de tu PC, puerto `VIEWER_SERVICE_PORT`. Vos dijiste que ya
-   sabés hacer esto.
-4. En dev.twitch.tv, agregar como **segundo** OAuth Redirect URL (no
-   reemplazar el del bot): `https://tuombre.duckdns.org/viewer-auth/callback`.
-5. `.env`: `TWITCH_VIEWER_REDIRECT_URI=https://tuombre.duckdns.org/viewer-auth/callback`.
-
-**Lo que construyo yo:**
-
-- `viewer/server.js` sirve HTTPS directo con el cert de win-acme (rutas
-  configurables por env, mismo patrón que `config.https.certFile/keyFile`
-  del backend admin) **o**, más simple, corre HTTP plano detrás de un
-  reverse proxy liviano en el propio Windows que sí sabe hablar TLS (a
-  decidir según qué te resulte menos fricción cuando lleguemos acá — lo
-  reviso con vos en su momento, no hace falta resolverlo esta noche).
-- Documentar los 5 pasos de arriba en `WINDOWS.md`, con el mismo nivel de
-  detalle que ya tiene esa guía para el resto del setup.
-
-**Acceptance criteria:**
-
-- [ ] Desde un celular con datos móviles (fuera de tu red de casa), abrir
-      `https://tuombre.duckdns.org/` carga la pantalla sin advertencia de
-      certificado.
-- [ ] El login de viewer funciona de punta a punta desde ese celular.
-- [ ] Apagar y prender la PC (IP pública nueva) no rompe nada: DuckDNS se
-      actualiza solo (el propio router o un cliente DuckDNS liviano) y el
-      hostname sigue resolviendo.
+**Lo que quedó como alternativa documentada, no en uso**: DuckDNS
+(`kloneetv.duckdns.org`) + `scripts/duckdns-update.mjs` (proceso `tts-duckdns`
+de PM2) siguen corriendo y el certificado real de win-acme para ese hostname
+sigue en `C:\certs\` — no se desarmó nada, por si en algún momento se
+reemplaza el router y conviene volver al port-forward directo. `viewer/server.js`
+todavía sabe servir HTTPS con ese certificado (`VIEWER_HTTPS=true`), aunque hoy
+corre en HTTP plano porque Cloudflare Tunnel termina el TLS público en su borde.
 
 ### T-017 — Comando `!configura-mi-voz`
 
