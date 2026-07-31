@@ -32,3 +32,6 @@ Thumbs.db
 
 # Certificados TLS locales para HTTPS (mkcert): nunca se commitean.
 certs/
+
+# PID del túnel de Cloudflare (T-016), lo escribe scripts/cloudflare-tunnel.mjs.
+scripts/.cloudflared.pid

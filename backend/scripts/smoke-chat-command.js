@@ -26,6 +26,7 @@ import path from 'node:path';
 
 import {
   COMMAND_OUTCOMES,
+  VOICE_CONFIG_COMMAND,
   VOICE_ROLL_COMMAND,
   createChatCommands,
   isSpanishVoice,
@@ -208,7 +209,9 @@ try {
 
   await check(`el nombre del comando es exactamente ${VOICE_ROLL_COMMAND}`, () => {
     assert.equal(VOICE_ROLL_COMMAND, '!cambia-mi-voz');
-    assert.deepEqual(commands.names(), [VOICE_ROLL_COMMAND]);
+    // T-017 sumó !configura-mi-voz al lado (ver la comprobación más abajo, en
+    // "nunca rompe el chat"): la lista de comandos registrados ya no es de uno solo.
+    assert.deepEqual(commands.names(), [VOICE_ROLL_COMMAND, VOICE_CONFIG_COMMAND]);
   });
 
   await check('lo reconoce con mayúsculas, espacios de más y argumentos detrás', () => {
@@ -552,6 +555,47 @@ try {
       registry: countingRegistry,
     });
     const result = await roto.handle(makeMessage({ text: VOICE_ROLL_COMMAND }));
+    assert.equal(result.outcome, COMMAND_OUTCOMES.failed);
+  });
+
+  await check(`${VOICE_CONFIG_COMMAND} postea el link con sendMessage inyectado (NUNCA el real)`, async () => {
+    // sendChatMessage() real habla con la sesión de Twitch GLOBAL del proceso,
+    // no con `repositories` inyectado — este smoke test es hermético para todo
+    // lo demás, pero para este comando hace falta inyectar un doble a propósito,
+    // o el comando termina publicando de verdad (pasó una vez: ver la nota en
+    // `createChatCommands()`). Nunca se debe quitar este `sendMessage` de acá.
+    const sent = [];
+    const conVoz = createChatCommands({
+      repositories,
+      registry: countingRegistry,
+      sendMessage: async (text) => {
+        sent.push(text);
+      },
+    });
+
+    const result = await conVoz.handle(makeMessage({ userId: '201', username: 'chelo', displayName: 'chelo', text: VOICE_CONFIG_COMMAND }));
+    assert.equal(result.matched, true);
+    assert.equal(result.applied, true);
+    assert.equal(result.outcome, COMMAND_OUTCOMES.applied);
+    assert.equal(sent.length, 1, 'debía llamar a sendMessage exactamente una vez');
+    assert.match(sent[0], /^@chelo /);
+    assert.ok(sent[0].includes('http'), 'el mensaje debe incluir el link');
+  });
+
+  await check(`${VOICE_CONFIG_COMMAND} nunca lanza si sendMessage (inyectado) falla`, async () => {
+    const conVozRota = createChatCommands({
+      repositories,
+      registry: countingRegistry,
+      sendMessage: async () => {
+        throw new Error('Twitch caído (simulado)');
+      },
+    });
+
+    const result = await conVozRota.handle(
+      makeMessage({ userId: '201', username: 'chelo', displayName: 'chelo', text: VOICE_CONFIG_COMMAND }),
+    );
+    assert.equal(result.matched, true);
+    assert.equal(result.applied, false);
     assert.equal(result.outcome, COMMAND_OUTCOMES.failed);
   });
 

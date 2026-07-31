@@ -11,8 +11,8 @@
  *   Twitch.
  */
 
-/** Nombre de las tres tablas del esquema, en el orden en que se crean. */
-export const TABLE_NAMES = ['tokens', 'users', 'app_settings'];
+/** Nombre de las tablas del esquema, en el orden en que se crean. */
+export const TABLE_NAMES = ['tokens', 'users', 'app_settings', 'viewer_sessions'];
 
 /** Voz global y tema por default, sembrados la primera vez. */
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -50,6 +50,23 @@ CREATE TABLE IF NOT EXISTS app_settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Identidad de viewers que iniciaron sesión con Twitch para probar quiénes son
+-- (p. ej. la pantalla de "!configura-mi-voz"). Deliberadamente separada de
+-- \`tokens\`: nunca se guarda el access/refresh token del viewer acá (ni en
+-- ningún lado) — se pide, se usa una vez para leer \`/helix/users\` y se
+-- descarta. Esta tabla es la única sesión del viewer, nunca toca ni compite
+-- con la fila 'twitch' de \`tokens\` (esa es la sesión del bot/streamer).
+CREATE TABLE IF NOT EXISTS viewer_sessions (
+  session_id     TEXT PRIMARY KEY,
+  twitch_user_id TEXT NOT NULL,
+  username       TEXT NOT NULL,
+  display_name   TEXT NOT NULL,
+  created_at     INTEGER NOT NULL,
+  expires_at     INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS viewer_sessions_expires_at_idx ON viewer_sessions (expires_at);
 `;
 
 /**

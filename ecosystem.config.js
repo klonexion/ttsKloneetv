@@ -2,7 +2,13 @@
  * Configuración de PM2 para el monorepo (misma en macOS y Windows 11).
  *
  * Convenciones a respetar por las tareas siguientes:
- * - Un proceso por paquete: `tts-backend` (Express + ws) y `tts-frontend` (Vite).
+ * - Un proceso por paquete: `tts-backend` (Express + ws, admin, solo
+ *   localhost), `tts-frontend` (Vite) y `tts-viewer` (T-015: el único proceso
+ *   pensado para exponerse a internet — login de viewer + pantalla de
+ *   "!configura-mi-voz", ver `docs/exec-plans/active/configura-mi-voz.md`).
+ * - `tts-duckdns` (T-016): mantiene `DUCKDNS_DOMAIN.duckdns.org` apuntando a
+ *   tu IP pública. Opcional — sin `DUCKDNS_DOMAIN`/`DUCKDNS_TOKEN` en `.env`
+ *   loguea una vez y queda inactivo, no hace falta para desarrollar.
  * - Se invoca siempre el entrypoint de Node directamente (nunca `npm run ...`)
  *   para que PM2 no necesite un intérprete de shell: eso rompe en Windows.
  * - Rutas construidas con `path.join(__dirname, ...)`: sin rutas POSIX hardcodeadas.
@@ -46,6 +52,38 @@ module.exports = {
       },
       out_file: path.join(logsDir, 'frontend-out.log'),
       error_file: path.join(logsDir, 'frontend-error.log'),
+      merge_logs: true,
+      time: true,
+    },
+    {
+      name: 'tts-viewer',
+      cwd: path.join(root, 'viewer'),
+      script: 'server.js',
+      interpreter: 'node',
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      env: {
+        NODE_ENV: 'development',
+      },
+      out_file: path.join(logsDir, 'viewer-out.log'),
+      error_file: path.join(logsDir, 'viewer-error.log'),
+      merge_logs: true,
+      time: true,
+    },
+    {
+      name: 'tts-duckdns',
+      cwd: root,
+      script: path.join('scripts', 'duckdns-update.mjs'),
+      interpreter: 'node',
+      watch: false,
+      autorestart: true,
+      max_restarts: 10,
+      env: {
+        NODE_ENV: 'development',
+      },
+      out_file: path.join(logsDir, 'duckdns-out.log'),
+      error_file: path.join(logsDir, 'duckdns-error.log'),
       merge_logs: true,
       time: true,
     },

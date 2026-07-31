@@ -1,7 +1,8 @@
 /**
- * Comandos de chat (T-012). Hoy hay uno solo, `!cambia-mi-voz`: quien lo escribe
+ * Comandos de chat (T-012, T-017). Hay dos: `!cambia-mi-voz` (quien lo escribe
  * se lleva una voz aleatoria en español del catálogo completo, persistida con
- * `voice_source = 'command'`.
+ * `voice_source = 'command'`) y `!configura-mi-voz` (postea el link a la
+ * pantalla propia de configuración, T-015/`viewer/`).
  *
  * ## Dónde encaja
  *
@@ -35,8 +36,10 @@
  * - **Nunca lanza.** Se ejecuta en el camino de un mensaje de chat: un fallo de la
  *   base, del catálogo o de la red se registra en el log y el chat sigue.
  */
+import { config } from '../config.js';
 import { getRepositories } from '../db/index.js';
 import { logger } from '../logger.js';
+import { sendChatMessage } from './send.js';
 import { COMMAND_PREFIX } from '../tts/filters.js';
 import { isPreferredLanguage } from '../tts/router.js';
 import { getTtsRegistry } from '../tts/registry.js';
@@ -56,6 +59,9 @@ import {
  * justo por lo que el mensaje no se lee en voz alta.
  */
 export const VOICE_ROLL_COMMAND = `${COMMAND_PREFIX}cambia-mi-voz`;
+
+/** T-017: postea el link a la pantalla de configuración de voz (`viewer/`). */
+export const VOICE_CONFIG_COMMAND = `${COMMAND_PREFIX}configura-mi-voz`;
 
 /**
  * Resultado de `handle()`. `matched: false` significa "el mensaje no era un
@@ -125,11 +131,20 @@ export function pickRandomSpanishVoice(voices, excludeVoiceId, random = Math.ran
  *        el del proceso, **resuelto tarde** (en el primer comando) para no
  *        construir motores solo por crear el relay.
  * @param {() => number} [options.random] fuente de aleatoriedad (inyectable).
+ * @param {Function} [options.sendMessage] `!configura-mi-voz` postea con esto
+ *        (T-017); por default `sendChatMessage()` real, que habla con la
+ *        sesión de Twitch **global** del proceso (no con `repositories`
+ *        inyectado). **Cualquier prueba que ejercite ese comando tiene que
+ *        inyectar acá un doble** — de lo contrario el comando termina
+ *        publicando de verdad en el canal real (pasó una vez, ver el
+ *        historial de T-017: una prueba sin este parámetro posteó un mensaje
+ *        real durante un smoke test).
  */
 export function createChatCommands({
   repositories = getRepositories,
   registry = null,
   random = Math.random,
+  sendMessage = sendChatMessage,
 } = {}) {
   const resolveRegistry = () => registry ?? getTtsRegistry();
 
@@ -191,8 +206,30 @@ export function createChatCommands({
     };
   };
 
+  /**
+   * T-017: postea el link a la pantalla de configuración (`viewer/`), propio
+   * de cada streamer vía `config.viewerService.publicUrl`. No toca SQLite ni
+   * el catálogo de voces — el guardado real lo hace `viewer/preferences-router.js`
+   * cuando el viewer confirma en la pantalla, autenticado con SU sesión de
+   * Twitch, no con este comando (que cualquiera puede escribir sin probar
+   * quién es).
+   */
+  const configureVoice = async (message) => {
+    const url = config.viewerService.publicUrl;
+    try {
+      await sendMessage(`@${message.displayName} configurá tu voz acá: ${url}`);
+    } catch (error) {
+      logger.error(`chat: no se pudo publicar el link de ${VOICE_CONFIG_COMMAND} (${error.message})`);
+      return { matched: true, applied: false, outcome: COMMAND_OUTCOMES.failed, voiceId: null };
+    }
+    return { matched: true, applied: true, outcome: COMMAND_OUTCOMES.applied, voiceId: null };
+  };
+
   /** Qué comando ejecuta qué. Añadir uno nuevo es una entrada más aquí. */
-  const handlers = new Map([[VOICE_ROLL_COMMAND, rollVoice]]);
+  const handlers = new Map([
+    [VOICE_ROLL_COMMAND, rollVoice],
+    [VOICE_CONFIG_COMMAND, configureVoice],
+  ]);
 
   return {
     /** Los comandos que este backend entiende. */

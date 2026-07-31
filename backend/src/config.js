@@ -78,6 +78,15 @@ export const TTS_DEFAULTS = Object.freeze({
   edgeVoiceLanguages: Object.freeze(['es']),
 });
 
+/**
+ * Defaults del login de viewers (identidad, no la sesión del bot). Ver
+ * `src/auth/viewer-session.js`. `sessionTtlMs` es cuánto dura logueado antes
+ * de tener que volver a pasar por Twitch.
+ */
+export const VIEWER_AUTH_DEFAULTS = Object.freeze({
+  sessionTtlMs: 30 * 60 * 1000,
+});
+
 /** Lee un booleano de entorno (`false`, `0` y `no` son falso). */
 const envFlag = (name, fallback) => {
   const raw = envValue(name);
@@ -162,6 +171,59 @@ export const config = {
       10,
     ),
     refreshMarginMs: TWITCH_DEFAULTS.refreshMarginMs,
+  },
+  /**
+   * Login de viewers (T-014): flujo de identidad separado del bot, para que un
+   * espectador pruebe "soy yo" (p. ej. antes de configurar su voz) sin que eso
+   * toque ni pueda pisar la sesión de `twitch.*` de arriba — esa es del bot, esta
+   * es de cada viewer, y ni siquiera comparten tabla (`viewer_sessions` vs
+   * `tokens`).
+   *
+   * **Opt-in**: sin `TWITCH_VIEWER_REDIRECT_URI` el flujo queda deshabilitado
+   * (`viewerAuth.enabled === false`) y `/viewer-auth/*` responde 404 en vez de
+   * usar por accidente el redirect URI del bot, que es una ruta distinta
+   * (`/auth/callback`) y rompería el intercambio de code.
+   *
+   * Reusa el mismo `client_id`/`client_secret` que `twitch.*` — en la consola de
+   * dev.twitch.tv de tu app hay que agregar esta URL como un segundo "OAuth
+   * Redirect URL", no reemplazar la del bot. Sin scopes: el único uso es leer
+   * `GET /helix/users` con el token del propio viewer para saber quién es: no
+   * hace falta (ni se pide) permiso para leer/escribir chat ni moderar.
+   */
+  viewerAuth: {
+    enabled: envValue('TWITCH_VIEWER_REDIRECT_URI') !== null,
+    redirectUri: envValue('TWITCH_VIEWER_REDIRECT_URI'),
+    scopes: [],
+    sessionTtlMs: Number.parseInt(
+      process.env.TWITCH_VIEWER_SESSION_TTL_MS ?? String(VIEWER_AUTH_DEFAULTS.sessionTtlMs),
+      10,
+    ),
+  },
+  /**
+   * El proceso nuevo y separado de `viewer-auth` (T-015): sirve la pantalla de
+   * "!configura-mi-voz" en su propio puerto, para que el backend admin de
+   * arriba nunca necesite estar expuesto a internet. `publicUrl` es lo que el
+   * bot postea en el chat (`!configura-mi-voz`, `backend/src/chat/commands.js`)
+   * y por default es el propio localhost — en producción se pisa con la URL
+   * pública real (DDNS + certificado, ver `docs/exec-plans/active/configura-mi-voz.md`).
+   */
+  viewerService: {
+    port: Number.parseInt(process.env.VIEWER_SERVICE_PORT ?? '3100', 10),
+    publicUrl: trimTrailingSlashes(
+      envValue('VIEWER_SERVICE_PUBLIC_URL') ?? `http://localhost:${process.env.VIEWER_SERVICE_PORT ?? '3100'}`,
+    ),
+    /**
+     * HTTPS del servicio de viewer (T-016): certificado real (Let's Encrypt vía
+     * win-acme) para el hostname público de DuckDNS, **distinto** del
+     * certificado local de `https.*` de arriba (ese es de `mkcert` para
+     * `localhost`, no sirve para un hostname público). Opt-in con
+     * `VIEWER_HTTPS=true`, igual criterio que `HTTPS` para el backend admin.
+     */
+    https: {
+      enabled: envFlag('VIEWER_HTTPS', false),
+      certFile: envValue('VIEWER_TLS_CERT_FILE') ?? path.join(repoRoot, 'certs', 'duckdns', 'fullchain.pem'),
+      keyFile: envValue('VIEWER_TLS_KEY_FILE') ?? path.join(repoRoot, 'certs', 'duckdns', 'privkey.pem'),
+    },
   },
   tts: {
     edgeEnabled: envFlag('TTS_EDGE_ENABLED', TTS_DEFAULTS.edgeEnabled),

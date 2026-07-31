@@ -8,17 +8,17 @@
     "node": ">=20"
   },
   "scripts": {
-    "postinstall": "npm --prefix backend install && npm --prefix frontend install",
-    "setup": "npm --prefix backend install && npm --prefix frontend install",
-    "start": "node scripts/docker-melo.mjs up && pm2 start ecosystem.config.js",
-    "stop": "pm2 stop ecosystem.config.js && node scripts/docker-melo.mjs stop",
+    "postinstall": "npm --prefix backend install && npm --prefix frontend install && npm --prefix viewer install",
+    "setup": "npm --prefix backend install && npm --prefix frontend install && npm --prefix viewer install",
+    "start": "node scripts/docker-melo.mjs up && node scripts/cloudflare-tunnel.mjs up && pm2 start ecosystem.config.js",
+    "stop": "pm2 stop ecosystem.config.js && node scripts/docker-melo.mjs stop && node scripts/cloudflare-tunnel.mjs stop",
     "restart": "pm2 restart ecosystem.config.js",
-    "down": "pm2 delete ecosystem.config.js && node scripts/docker-melo.mjs down",
+    "down": "pm2 delete ecosystem.config.js && node scripts/docker-melo.mjs down && node scripts/cloudflare-tunnel.mjs stop",
     "status": "pm2 status",
     "logs": "pm2 logs",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
-    "lint": "npm --prefix backend run lint && npm --prefix frontend run lint",
+    "lint": "npm --prefix backend run lint && npm --prefix frontend run lint && npm --prefix viewer run lint",
     "build": "npm --prefix frontend run build"
   },
   "devDependencies": {

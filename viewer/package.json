@@ -1,0 +1,27 @@
+{
+  "name": "tts-hub-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Servicio público mínimo (T-015): login de viewer + pantalla de \"!configura-mi-voz\". Nunca es el backend admin.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
+    "test": "node smoke-viewer-service.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^17.7.0"
+  }
+}

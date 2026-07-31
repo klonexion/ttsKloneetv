@@ -12,9 +12,16 @@ import { createUsersRouter } from './users/router.js';
  * App Express del backend.
  *
  * Convención de rutas (ver "Decisiones arquitectónicas durables" del plan):
- * - `GET /auth/login` y `GET /auth/callback`  → OAuth de Twitch (T-003).
+ * - `GET /auth/login` y `GET /auth/callback`  → OAuth de Twitch, sesión del bot (T-003).
  * - Todo lo demás bajo `/api/*`               → REST para el frontend.
  * - El WebSocket frontend↔backend vive en `/ws` (ver `src/ws/hub.js`).
+ *
+ * Este backend admin **nunca se expone a internet** (T-015,
+ * `docs/exec-plans/active/configura-mi-voz.md`): el login de viewer y la
+ * pantalla de "!configura-mi-voz" viven en `viewer/server.js`, un proceso
+ * aparte con su propio puerto. Si en algún momento aparece acá una ruta
+ * pensada para que le pegue alguien que no sea el propio streamer desde su
+ * `localhost`, es una señal de que se está rompiendo esa separación.
  */
 export function createApp() {
   const app = express();

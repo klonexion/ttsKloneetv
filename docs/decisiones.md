@@ -88,3 +88,24 @@
 - Proveedores YouTube y TikTok.
 - Más motores TTS.
 - Historial de chat persistente / analíticas.
+
+## `!configura-mi-voz` — sesión de grill 2026-07-30
+
+Plan completo en `docs/exec-plans/active/configura-mi-voz.md`. Decisiones:
+
+- **Servicio público separado y mínimo**, nunca el backend admin entero: lo
+  único expuesto a internet es un proceso nuevo (`viewer/`) que solo sabe
+  loguear a un viewer, mostrarle la pantalla y guardar su propia fila. El
+  backend admin (moderación, enviar chat como el streamer, ajustes) sigue
+  100% `localhost`.
+- **Salida a internet: hostname DDNS fijo (DuckDNS) + certificado real
+  (win-acme/Let's Encrypt)**, no un túnel efímero — Twitch exige match exacto
+  de `redirect_uri`, y una URL que cambia cada sesión (túnel gratis sin
+  cuenta) obligaría a re-registrar el redirect URI en dev.twitch.tv cada vez
+  que se prende el sistema.
+- **La voz que el viewer se elige entra al mismo nivel que el override del
+  streamer** (nivel 1 de la prioridad de arriba): gana el último que la
+  toque, sea el streamer desde su panel o el viewer desde esta pantalla nueva.
+  No se agrega un nivel de prioridad nuevo.
+- El viewer puede tocar **voz + volumen + pitch/timbre** de sí mismo. Mutear/
+  ignorar sigue siendo exclusivo del panel del streamer.

@@ -28,10 +28,64 @@
  *
  * Nada de comandos exclusivos de Unix: `spawn` con array de argumentos (no
  * `shell: true`), así funciona igual en macOS y en Windows 11.
+ *
+ * `TTS_MELO_ENABLED=false` en el `.env` desactiva el motor por completo
+ * (`backend/src/tts/melo-engine.js`): este script respeta la misma bandera y,
+ * si está apagada, ni siquiera intenta `docker compose up` — así una instalación
+ * sin Docker (o que no quiere el contenedor arriba) no ve el aviso de "imagen
+ * no encontrada" en cada `npm start`.
  */
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const TIMEOUT_MS = 15_000;
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * Parser mínimo de `.env` (sin dependencias: este script corre desde la raíz,
+ * donde no hay `node_modules/dotenv` instalado). Nunca pisa una variable que
+ * ya esté en `process.env`, igual que `dotenv.config()` en `backend/src/config.js`.
+ */
+function loadEnvFile(file) {
+  let content;
+  try {
+    content = readFileSync(file, 'utf8');
+  } catch {
+    return;
+  }
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) {
+      continue;
+    }
+    const match = /^([\w.-]+)\s*=\s*(.*)$/.exec(trimmed);
+    if (!match) {
+      continue;
+    }
+    const [, key, rawValue] = match;
+    if (process.env[key] !== undefined) {
+      continue;
+    }
+    process.env[key] = rawValue.trim().replace(/^['"]|['"]$/g, '');
+  }
+}
+
+// Misma precedencia que `backend/src/config.js`: entorno del proceso > .env de
+// la raíz > backend/.env.
+loadEnvFile(path.join(repoRoot, '.env'));
+loadEnvFile(path.join(repoRoot, 'backend', '.env'));
+
+/** Misma regla que `isMeloEnabled()` de `backend/src/tts/melo-engine.js`. */
+function isMeloEnabled() {
+  const raw = process.env.TTS_MELO_ENABLED;
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    return true;
+  }
+  return !['false', '0', 'no'].includes(raw.trim().toLowerCase());
+}
 
 const ACTIONS = Object.freeze({
   up: ['compose', 'up', '--no-build', '-d', 'melotts'],
@@ -61,6 +115,13 @@ const action = process.argv[2];
 if (!Object.hasOwn(ACTIONS, action)) {
   console.error(`Uso: node scripts/docker-melo.mjs <${Object.keys(ACTIONS).join('|')}>`);
   process.exit(1);
+}
+
+// Solo se frena `up`: `stop`/`down` deben poder limpiar un contenedor que haya
+// quedado arriba de antes de apagar la bandera, aunque MeloTTS esté deshabilitado.
+if (action === 'up' && !isMeloEnabled()) {
+  console.log('MeloTTS: TTS_MELO_ENABLED=false en el .env; se omite `docker compose up` (motor deshabilitado).');
+  process.exit(0);
 }
 
 const { start, ok, fail } = MESSAGES[action];
